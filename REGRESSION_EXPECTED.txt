@@ -1,0 +1,17 @@
+FINAL REGRESSION — Starting Qty 0.01 / Target 500 / SL 250 / Recovery 400
+
+Quantity chain:
+0.01 STOP -> loss 2.5 -> recovery 0.01 -> next 0.02
+0.02 STOP -> loss 5.0 -> recovery 0.02 -> next 0.04
+0.04 STOP -> loss 10.0 -> recovery 0.03 -> next 0.07
+TARGET at any quantity -> next quantity 0.01 and direction flips.
+
+P/L display rule:
+raw price movement points = signed price movement according to direction
+quantity-adjusted P/L = raw price movement points × quantity
+
+Examples from the reported bug:
+CALL #4 SELL 0.01: 62894 -> 63144 = Move -250 points, P/L -2.5
+CALL #5 BUY 0.02: 63374.5 -> 63124.5 = Move -250 points, P/L -5
+CALL #6 SELL 0.04: 63081 -> 63331 = Move -250 points, P/L -10
+CALL #7 BUY 0.07: 63272 -> 63772 = Move +500 points, P/L +35
