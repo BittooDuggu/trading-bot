@@ -1,42 +1,15 @@
-# Trading Bot V16 — FINAL COMPLETE STATUS
+# Trading Bot V16 — Server Recovery Engine
 
-This package is the deployable V15 project.
+## Final architecture for this stage
+- Java `QuantityEngine` is the single source of truth for STOP LOSS recovery and TARGET reset.
+- Java `BacktestEngine` receives historical candles from the browser and performs the complete trade simulation.
+- Browser no longer calculates recovery quantities or backtest transitions.
+- `TEST RECOVERY` calls `/api/strategy/recovery-test` and displays all 12 consecutive STOP LOSS steps.
+- `/api/strategy/recovery-regression` verifies the expected 12-step regression chain.
 
-## Included
-- Spring Boot Java 17 backend
-- Deterministic `BigDecimal` quantity/recovery engine
-- Exact BUY/SELL price-movement and quantity-adjusted P/L engine
-- JPA entities/repositories for strategy configs and backtest runs/trades
-- H2 development database foundation
-- Historical Delta candle backtest UI backed by the Java `BacktestEngine`
-- Recovery-chain, P/L and server-side backtest regression tests
-- Dockerfile for Render
-- iPhone/GitHub deployment guide
-
-## Critical strategy regression
+## Required regression
 Starting quantity `0.01`, SL `250`, Recovery `400`:
+`0.01 -> 0.02 -> 0.04 -> 0.07 -> 0.12 -> 0.20 -> 0.33 -> 0.54 -> 0.88 -> 1.43 -> 2.33 -> 3.79 -> 6.16`
 
-`0.01 STOP -> 0.02 -> 0.04 -> 0.07`
-
-Any TARGET resets the NEXT quantity to `0.01` and flips direction.
-
-## P/L regression
-- SELL 0.01: 62894 -> 63144 = Move -250, P/L -2.5
-- BUY 0.02: 63374.5 -> 63124.5 = Move -250, P/L -5
-- SELL 0.04: 63081 -> 63331 = Move -250, P/L -10
-- BUY 0.07: 63272 -> 63772 = Move +500, P/L +35
-
-## Build verification
-Run:
-
-```bash
-mvn test
-mvn spring-boot:run
-```
-
-## Render
-Use a Web Service with Docker runtime and the repository root as the Dockerfile location. The app listens on `PORT` when Render supplies it, otherwise 10000.
-
-## V16 backtest architecture
-
-The browser fetches Delta historical candles but does not calculate the strategy result locally. It POSTs the candles and settings to `POST /api/backtest/run`. `BacktestEngine` uses `BigDecimal`, `QuantityEngine`, and `TradePnlEngine`, then performs a quantity/direction chain audit before returning results. This prevents browser-only calculation drift.
+## Deployment
+Render should build the Dockerfile and expose the port supplied by `PORT`.
