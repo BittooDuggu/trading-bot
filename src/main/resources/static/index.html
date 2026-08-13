@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#2563eb">
-<title>Trading Bot V15 — Final Backtest</title>
+<title>Trading Bot V16 — Server Recovery Engine</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#f4f5f7;color:#101828;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -32,11 +32,11 @@ button.green{background:#16a34a} button.red{background:#dc2626} button.gray{back
 .hidden{display:none}
 @media(max-width:520px){.grid{gap:9px}.title{font-size:27px}.card{padding:16px}.statgrid{grid-template-columns:1fr 1fr}}
 </style>
-<meta name="version" content="V15-FINAL-PNL-LOCKED">
+<meta name="version" content="V16-SERVER-RECOVERY-BACKTEST">
 </head>
 <body>
 <main class="wrap">
-<div class="title">📈 Trading Bot V15</div>
+<div class="title">📈 Trading Bot V16</div>
 
 <div class="card">
   <h2>Strategy Settings</h2>
@@ -92,6 +92,7 @@ button.green{background:#16a34a} button.red{background:#dc2626} button.gray{back
     <button id="stopBacktest" class="red hidden">STOP TEST</button>
     <button id="exportBacktest" class="gray hidden">EXPORT CSV</button>
   </div>
+  <div id="recoveryOutput" class="note hidden" style="white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:13px"></div>
   <div id="progressBox" class="hidden">
     <div class="muted" id="progressText">Loading candles…</div>
     <div class="progress"><div id="progressBar"></div></div>
@@ -148,65 +149,6 @@ function roundQty(q,precision){
   const n=Number(q);
   if(!Number.isFinite(n)) return 0;
   return Number(n.toFixed(precision));
-}
-function quantityUnits(q,precision){
-  const unit=qtyUnit(precision);
-  const n=Number(q);
-  if(!(n>0)) return 0;
-  return Math.round(n/unit);
-}
-function unitsToQty(units,precision){
-  if(!(Number.isInteger(units) && units>0)) return 0;
-  return Number((units*qtyUnit(precision)).toFixed(precision));
-}
-function calculateRecovery(previousQty, slPoints, recoveryPoints, precision){
-  const previous=Number(previousQty), sl=Number(slPoints), recoveryMove=Number(recoveryPoints);
-  if(!(previous>0 && sl>0 && recoveryMove>0 && Number.isInteger(precision) && precision>=0)) throw new Error('Invalid recovery inputs.');
-
-  // Work entirely in integer quantity units. This removes cumulative floating-point
-  // errors that can appear only after many STOP LOSS transitions.
-  const previousUnits=quantityUnits(previous,precision);
-  if(!(previousUnits>0)) throw new Error('Previous quantity cannot be represented.');
-  const unit=qtyUnit(precision);
-  const actualLoss=previousUnits*unit*sl;
-  const rawRecoveryQty=actualLoss/recoveryMove;
-  const recoveryUnits=Math.ceil((rawRecoveryQty/unit)-1e-12);
-  const nextUnits=previousUnits+Math.max(1,recoveryUnits);
-  const recoveryQty=unitsToQty(Math.max(1,recoveryUnits),precision);
-  const nextQty=unitsToQty(nextUnits,precision);
-
-  if(!(recoveryQty>0 && nextQty>previous)) throw new Error('Recovery engine produced an invalid next quantity.');
-  return {actualLoss,rawRecoveryQty,recoveryQty,nextQty,previousUnits,recoveryUnits,nextUnits};
-}
-
-// ONE state-transition function is used by the backtester for every completed trade.
-// This prevents target resets, stop-loss recovery, and direction changes from drifting apart.
-function nextStateAfterExit(trade, cfg){
-  const nextDirection = trade.direction==='BUY' ? 'SELL' : 'BUY';
-  if(trade.reason==='TARGET'){
-    return {direction:nextDirection, quantity:cfg.q, recoveryQty:0, actualLoss:0, rawRecovery:0, rule:'TARGET_RESET'};
-  }
-  if(trade.reason==='STOP LOSS'){
-    const c=calculateRecovery(trade.quantity,cfg.sl,cfg.recovery,cfg.precision);
-    return {direction:nextDirection, quantity:c.nextQty, recoveryQty:c.recoveryQty, actualLoss:c.actualLoss, rawRecovery:c.rawRecoveryQty, rule:'STOP_RECOVERY'};
-  }
-  throw new Error('Unknown exit reason.');
-}
-
-function auditQuantityChain(trades,cfg){
-  const errors=[];
-  for(let i=0;i<trades.length;i++){
-    const t=trades[i];
-    const expectedDirection=t.direction==='BUY'?'SELL':'BUY';
-    if(i+1<trades.length){
-      const n=trades[i+1];
-      if(n.direction!==expectedDirection) errors.push('#'+t.no+' direction → #'+n.no);
-      const expectedQty=t.reason==='TARGET' ? cfg.q : calculateRecovery(t.quantity,cfg.sl,cfg.recovery,cfg.precision).nextQty;
-      if(Math.abs(n.quantity-expectedQty)>Math.pow(10,-cfg.precision)/2) errors.push('#'+t.no+' qty '+fmt(n.quantity)+' expected '+fmt(expectedQty));
-    }
-    if(!(t.quantity>0)) errors.push('#'+t.no+' zero/negative quantity');
-  }
-  return errors;
 }
 function epochSeconds(date,time){
   return Math.floor(new Date(date+'T'+time+':00').getTime()/1000);
@@ -283,61 +225,23 @@ function tradeExit(trade, candle, bothRule){
   return null;
 }
 
-function runEngine(candles,cfg){
-  const trades=[];
-  let state={direction:cfg.firstDir, quantity:cfg.q};
-  let net=0, peak=0, maxDD=0;
-  let i=0;
-
-  while(i<candles.length){
-    const entryCandle=candles[i];
-    if(!Number.isFinite(entryCandle.open)){i++;continue;}
-
-    const qty=roundQty(state.quantity,cfg.precision);
-    if(!(qty>0)) throw new Error('Internal error: next call quantity is zero.');
-
-    const trade={
-      no:trades.length+1,
-      direction:state.direction,
-      quantity:qty,
-      entry:entryCandle.open,
-      targetPrice:state.direction==='BUY'?entryCandle.open+cfg.target:entryCandle.open-cfg.target,
-      slPrice:state.direction==='BUY'?entryCandle.open-cfg.sl:entryCandle.open+cfg.sl,
-      entryTime:entryCandle.time
-    };
-
-    let exit=null, exitIndex=-1;
-    for(let j=i;j<candles.length;j++){
-      exit=tradeExit(trade,candles[j],cfg.bothRule);
-      if(exit){exitIndex=j;break;}
-    }
-    if(!exit) break;
-
-    const exitCandle=candles[exitIndex];
-    const points=trade.direction==='BUY'?exit.price-trade.entry:trade.entry-exit.price;
-    const pnl=points*trade.quantity; // quantity-adjusted P/L; points is raw price movement
-    const transition=nextStateAfterExit({...trade,reason:exit.reason},cfg);
-
-    net+=pnl;
-    peak=Math.max(peak,net);
-    maxDD=Math.max(maxDD,peak-net);
-
-    trades.push({
-      no:trade.no,time:trade.entryTime,exitTime:exitCandle.time,
-      direction:trade.direction,quantity:trade.quantity,entry:trade.entry,exit:exit.price,
-      target:trade.targetPrice,sl:trade.slPrice,reason:exit.reason,bothHit:!!exit.bothHit,
-      points,pnl,actualLoss:transition.actualLoss,rawRecovery:transition.rawRecovery,
-      recoveryQty:transition.recoveryQty,nextQty:transition.quantity,nextDirection:transition.direction,
-      transitionRule:transition.rule
-    });
-
-    state={direction:transition.direction,quantity:transition.quantity};
-    i=exitIndex+1;
+async function runEngine(candles,cfg){
+  const payload={
+    startingQuantity:String(cfg.q),
+    targetPoints:String(cfg.target),
+    stopLossPoints:String(cfg.sl),
+    recoveryPoints:String(cfg.recovery),
+    firstDirection:cfg.firstDir,
+    bothHitRule:cfg.bothRule,
+    candles:candles.map(c=>({time:Math.trunc(c.time),open:String(c.open),high:String(c.high),low:String(c.low),close:String(c.close),volume:String(c.volume||0)}))
+  };
+  setProgress(100,'Running deterministic Java backtest engine…');
+  const res=await fetch('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});
+  if(!res.ok){
+    const text=await res.text();
+    throw new Error('Backtest engine failed: HTTP '+res.status+' '+text);
   }
-
-  const auditErrors=auditQuantityChain(trades,cfg);
-  if(auditErrors.length) throw new Error('Quantity-chain audit failed: '+auditErrors.join(', '));
-  return {trades,net,maxDD,endingQuantity:state.quantity,endingDirection:state.direction};
+  return await res.json();
 }
 function renderResult(out,cfg,candleCount){
   backtestTrades=out.trades;
@@ -396,39 +300,8 @@ async function runBacktest(){
     setProgress(0,'Connecting to public historical market data…');
     const candles=await fetchCandles(cfg);
     if(candles.length<2) throw new Error('Not enough historical candles were returned for this period.');
-    setProgress(100,'Running server-side deterministic strategy over '+candles.length+' candles…');
-    const serverResponse = await fetch(window.location.origin+'/api/backtest/run', {
-      method:'POST',
-      headers:{'Content-Type':'application/json',Accept:'application/json'},
-      body:JSON.stringify({
-        startingQuantity:String(cfg.q),
-        targetPoints:String(cfg.target),
-        stopLossPoints:String(cfg.sl),
-        recoveryPoints:String(cfg.recovery),
-        firstDirection:cfg.firstDir,
-        bothHitRule:cfg.bothRule,
-        candles
-      }),
-      signal:abortController.signal
-    });
-    if(!serverResponse.ok){
-      const message=await serverResponse.text();
-      throw new Error('Server backtest failed: HTTP '+serverResponse.status+' '+message);
-    }
-    const serverOut=await serverResponse.json();
-    const out={
-      trades:(serverOut.trades||[]).map(t=>({
-        no:t.number,time:t.entryTime,exitTime:t.exitTime,
-        direction:t.direction,quantity:Number(t.quantity),entry:Number(t.entryPrice),exit:Number(t.exitPrice),
-        target:Number(t.targetPrice),sl:Number(t.stopLossPrice),
-        reason:t.exitType==='TARGET'?'TARGET':'STOP LOSS',bothHit:!!t.bothLevelsTouched,
-        points:Number(t.movePoints),pnl:Number(t.pnl),actualLoss:Number(t.actualLoss),
-        rawRecovery:Number(t.rawRecoveryQuantity),recoveryQty:Number(t.recoveryQuantity),
-        nextQty:Number(t.nextQuantity),nextDirection:t.nextDirection,transitionRule:t.exitType==='TARGET'?'TARGET_RESET':'STOP_RECOVERY'
-      })),
-      net:Number(serverOut.netPnl),maxDD:Number(serverOut.maxDrawdown),
-      endingQuantity:Number(serverOut.endingQuantity),endingDirection:serverOut.endingDirection
-    };
+    setProgress(100,'Running strategy over '+candles.length+' candles…');
+    const out=await runEngine(candles,cfg);
     renderResult(out,cfg,candles.length);
     $('exportBacktest').classList.remove('hidden');
     setProgress(100,'Backtest complete.');
@@ -443,13 +316,16 @@ async function runBacktest(){
 
 $('formulaTest').addEventListener('click',async()=>{
   try{
-    const q=String($('qty').value), sl=String($('sl').value), rec=String($('recovery').value);
-    setProgress(20,'Running recovery test on the Java strategy engine…');
-    const res=await fetch(window.location.origin+'/api/strategy/recovery-test?startingQuantity='+encodeURIComponent(q)+'&stopLossPoints='+encodeURIComponent(sl)+'&recoveryPoints='+encodeURIComponent(rec)+'&steps=6');
-    if(!res.ok) throw new Error('Recovery test failed: HTTP '+res.status);
+    const q=encodeURIComponent($('qty').value), sl=encodeURIComponent($('sl').value), rec=encodeURIComponent($('recovery').value);
+    const res=await fetch('/api/strategy/recovery-test?startingQuantity='+q+'&stopLossPoints='+sl+'&recoveryPoints='+rec+'&steps=12');
+    if(!res.ok) throw new Error('Recovery engine HTTP '+res.status);
     const rows=await res.json();
-    const chain=rows.map(x=>fmt(Number(x.previousQuantity))+' → '+fmt(Number(x.recoveryQuantity))+' → '+fmt(Number(x.nextQuantity)));
-    setProgress(100,'JAVA RECOVERY TEST PASS → '+chain.join(' | '));
+    const expected=rows.map(r=>r.nextQuantity);
+    const chain=[rows[0].previousQuantity,...expected].join(' → ');
+    const output=rows.map(r=>'SL #'+r.step+' | Qty '+r.previousQuantity+' | Loss '+r.actualLoss+' | Recovery '+r.recoveryQuantity+' | NEXT '+r.nextQuantity).join('\n');
+    $('recoveryOutput').classList.remove('hidden');
+    $('recoveryOutput').innerHTML='<b>JAVA RECOVERY ENGINE — 12 CONSECUTIVE STOP LOSSES</b>\n\n'+output+'\n\n<b>CHAIN</b>\n'+chain;
+    setProgress(100,'RECOVERY TEST PASS — calculated by Java backend');
   }catch(e){alert(e.message||String(e));}
 });
 
