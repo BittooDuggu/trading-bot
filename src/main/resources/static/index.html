@@ -396,8 +396,39 @@ async function runBacktest(){
     setProgress(0,'Connecting to public historical market data…');
     const candles=await fetchCandles(cfg);
     if(candles.length<2) throw new Error('Not enough historical candles were returned for this period.');
-    setProgress(100,'Running strategy over '+candles.length+' candles…');
-    const out=runEngine(candles,cfg);
+    setProgress(100,'Running server-side deterministic strategy over '+candles.length+' candles…');
+    const serverResponse = await fetch(window.location.origin+'/api/backtest/run', {
+      method:'POST',
+      headers:{'Content-Type':'application/json',Accept:'application/json'},
+      body:JSON.stringify({
+        startingQuantity:String(cfg.q),
+        targetPoints:String(cfg.target),
+        stopLossPoints:String(cfg.sl),
+        recoveryPoints:String(cfg.recovery),
+        firstDirection:cfg.firstDir,
+        bothHitRule:cfg.bothRule,
+        candles
+      }),
+      signal:abortController.signal
+    });
+    if(!serverResponse.ok){
+      const message=await serverResponse.text();
+      throw new Error('Server backtest failed: HTTP '+serverResponse.status+' '+message);
+    }
+    const serverOut=await serverResponse.json();
+    const out={
+      trades:(serverOut.trades||[]).map(t=>({
+        no:t.number,time:t.entryTime,exitTime:t.exitTime,
+        direction:t.direction,quantity:Number(t.quantity),entry:Number(t.entryPrice),exit:Number(t.exitPrice),
+        target:Number(t.targetPrice),sl:Number(t.stopLossPrice),
+        reason:t.exitType==='TARGET'?'TARGET':'STOP LOSS',bothHit:!!t.bothLevelsTouched,
+        points:Number(t.movePoints),pnl:Number(t.pnl),actualLoss:Number(t.actualLoss),
+        rawRecovery:Number(t.rawRecoveryQuantity),recoveryQty:Number(t.recoveryQuantity),
+        nextQty:Number(t.nextQuantity),nextDirection:t.nextDirection,transitionRule:t.exitType==='TARGET'?'TARGET_RESET':'STOP_RECOVERY'
+      })),
+      net:Number(serverOut.netPnl),maxDD:Number(serverOut.maxDrawdown),
+      endingQuantity:Number(serverOut.endingQuantity),endingDirection:serverOut.endingDirection
+    };
     renderResult(out,cfg,candles.length);
     $('exportBacktest').classList.remove('hidden');
     setProgress(100,'Backtest complete.');
@@ -410,16 +441,15 @@ async function runBacktest(){
   }
 }
 
-$('formulaTest').addEventListener('click',()=>{
+$('formulaTest').addEventListener('click',async()=>{
   try{
-    const q=Number($('qty').value), sl=Number($('sl').value), rec=Number($('recovery').value), precision=qtyPrecision($('qty').value);
-    let chain=[], prev=q;
-    for(let i=0;i<6;i++){
-      const c=calculateRecovery(prev,sl,rec,precision);
-      chain.push(fmt(prev)+' → '+fmt(c.recoveryQty)+' → '+fmt(c.nextQty));
-      prev=c.nextQty;
-    }
-    setProgress(100,'RECOVERY TEST PASS → '+chain.join(' | '));
+    const q=String($('qty').value), sl=String($('sl').value), rec=String($('recovery').value);
+    setProgress(20,'Running recovery test on the Java strategy engine…');
+    const res=await fetch(window.location.origin+'/api/strategy/recovery-test?startingQuantity='+encodeURIComponent(q)+'&stopLossPoints='+encodeURIComponent(sl)+'&recoveryPoints='+encodeURIComponent(rec)+'&steps=6');
+    if(!res.ok) throw new Error('Recovery test failed: HTTP '+res.status);
+    const rows=await res.json();
+    const chain=rows.map(x=>fmt(Number(x.previousQuantity))+' → '+fmt(Number(x.recoveryQuantity))+' → '+fmt(Number(x.nextQuantity)));
+    setProgress(100,'JAVA RECOVERY TEST PASS → '+chain.join(' | '));
   }catch(e){alert(e.message||String(e));}
 });
 
