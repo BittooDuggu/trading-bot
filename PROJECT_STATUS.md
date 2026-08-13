@@ -1,4 +1,4 @@
-# Trading Bot V15 — FINAL COMPLETE STATUS
+# Trading Bot V16 — FINAL COMPLETE STATUS
 
 This package is the deployable V15 project.
 
@@ -8,8 +8,8 @@ This package is the deployable V15 project.
 - Exact BUY/SELL price-movement and quantity-adjusted P/L engine
 - JPA entities/repositories for strategy configs and backtest runs/trades
 - H2 development database foundation
-- Historical Delta candle backtest UI
-- Recovery-chain and P/L regression tests
+- Historical Delta candle backtest UI backed by the Java `BacktestEngine`
+- Recovery-chain, P/L and server-side backtest regression tests
 - Dockerfile for Render
 - iPhone/GitHub deployment guide
 
@@ -36,3 +36,7 @@ mvn spring-boot:run
 
 ## Render
 Use a Web Service with Docker runtime and the repository root as the Dockerfile location. The app listens on `PORT` when Render supplies it, otherwise 10000.
+
+## V16 backtest architecture
+
+The browser fetches Delta historical candles but does not calculate the strategy result locally. It POSTs the candles and settings to `POST /api/backtest/run`. `BacktestEngine` uses `BigDecimal`, `QuantityEngine`, and `TradePnlEngine`, then performs a quantity/direction chain audit before returning results. This prevents browser-only calculation drift.

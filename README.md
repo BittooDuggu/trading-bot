@@ -1,4 +1,4 @@
-# Trading Bot V15 — FINAL
+# Trading Bot V16 — FINAL
 
 This version locks the strategy transition and P/L semantics so the browser backtest and future Java backend use the same rules.
 
@@ -49,7 +49,7 @@ Open:
 
 `http://localhost:8080/`
 
-The browser backtest is available from the main page and continues to use historical Delta candles. The server also exposes:
+The browser fetches historical Delta candles, then sends them to the Java server-side backtest engine. Quantity transitions, exit selection, and P/L are therefore calculated by one BigDecimal-based implementation. The old browser calculation remains only as legacy code and is not used by the backtest. The server also exposes:
 
 - `POST /api/strategy/next` — quantity transition
 - `GET /api/strategy/recovery-test` — deterministic recovery chain
