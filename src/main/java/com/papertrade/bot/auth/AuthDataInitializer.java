@@ -1,0 +1,3 @@
+package com.papertrade.bot.auth;
+import org.springframework.boot.CommandLineRunner; import org.springframework.context.annotation.Bean; import org.springframework.context.annotation.Configuration; import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+@Configuration public class AuthDataInitializer { @Bean CommandLineRunner seedAdmin(UserRepository r){return args->{if(r.findByEmailIgnoreCase("admin@tradingbot.local").isEmpty()){UserEntity u=new UserEntity();u.setName("Administrator");u.setEmail("admin@tradingbot.local");u.setPasswordHash(new BCryptPasswordEncoder().encode("12345678"));u.setRole(UserRole.ADMIN);r.save(u);}};}}
