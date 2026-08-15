@@ -1,0 +1,3 @@
+package com.papertrade.bot.strategy.type;
+import com.papertrade.bot.db.StrategyType; import org.springframework.stereotype.Component; import java.util.*;
+@Component public class MarketStrategyFactory { private final Map<StrategyType,MarketStrategy> map=new EnumMap<>(StrategyType.class); public MarketStrategyFactory(){register(new StocksStrategy());register(new IndexStrategy());register(new CryptoStrategy());register(new ForexStrategy());} private void register(MarketStrategy s){map.put(s.type(),s);} public MarketStrategy get(StrategyType t){MarketStrategy s=map.get(t); if(s==null) throw new IllegalArgumentException("Unsupported strategy type: "+t); return s;} }
