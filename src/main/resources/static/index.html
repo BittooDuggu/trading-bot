@@ -35,8 +35,37 @@ button.green{background:#16a34a} button.red{background:#dc2626} button.gray{back
 <meta name="version" content="V16-SERVER-RECOVERY-BACKTEST">
 </head>
 <body>
-<main class="wrap">
-<div class="title">📈 Trading Bot V16</div>
+<div id="auth" class="wrap">
+  <div class="title">📈 Trading Bot V17</div>
+  <div class="card">
+    <h2>Login</h2>
+    <div class="grid"><div><label>Email</label><input id="loginEmail" type="email" placeholder="you@example.com"></div><div><label>Password</label><input id="loginPassword" type="password" value="12345678"></div></div>
+    <button id="loginBtn" style="margin-top:12px">LOGIN</button>
+    <div id="loginMsg" class="warn hidden"></div>
+  </div>
+  <div class="card">
+    <h2>New User Registration</h2>
+    <div class="grid"><div><label>Name</label><input id="regName"></div><div><label>Email</label><input id="regEmail" type="email"></div><div><label>Password</label><input id="regPassword" type="password" value="12345678"></div></div>
+    <button id="registerBtn" class="green" style="margin-top:12px">REGISTER</button>
+    <div class="note">Test password: <b>12345678</b>. Registration creates a normal USER account. Only ADMIN can create/assign strategies.</div>
+    <div id="regMsg" class="warn hidden"></div>
+  </div>
+</div>
+<main id="app" class="wrap hidden">
+<div class="title">📈 Trading Bot V17 <button id="logoutBtn" class="red" style="float:right;font-size:12px">LOGOUT</button></div>
+<div id="userInfo" class="note"></div>
+<div id="strategyPanel" class="card"><h2>My Assigned Strategies</h2><div id="myStrategies" class="muted">Loading…</div></div>
+<div id="adminPanel" class="card hidden"><h2>ADMIN — Strategy Management</h2>
+  <div class="note">Admin can create the same strategy name multiple times. Each record has its own type: STOCKS, INDEX, CRYPTO or FOREX. Assign only the strategies a user should see.</div>
+  <h3>Create / Update Strategy</h3>
+  <div class="grid">
+    <div><label>Name</label><input id="sName" value="Recovery 500"></div><div><label>Type</label><select id="sType"><option>STOCKS</option><option>INDEX</option><option>CRYPTO</option><option>FOREX</option></select></div>
+    <div><label>Market</label><input id="sMarket" value="DELTA"></div><div><label>Symbol</label><input id="sSymbol" value="BTCUSD"></div>
+    <div><label>Starting Quantity</label><input id="sQty" type="number" step="any" value="0.01"></div><div><label>Target Points</label><input id="sTarget" type="number" step="any" value="500"></div>
+    <div><label>Stop Loss Points</label><input id="sSl" type="number" step="any" value="250"></div><div><label>Recovery Points</label><input id="sRec" type="number" step="any" value="400"></div>
+  </div><button id="createStrategy" class="green" style="margin-top:12px">CREATE STRATEGY</button>
+  <div id="adminStrategies" style="margin-top:16px"></div><h3>Users</h3><div id="adminUsers" class="muted">Loading…</div>
+</div>
 
 <div class="card">
   <h2>Strategy Settings</h2>
@@ -333,6 +362,21 @@ $('runBacktest').addEventListener('click',runBacktest);
 $('stopBacktest').addEventListener('click',()=>{if(abortController) abortController.abort();});
 $('exportBacktest').addEventListener('click',exportCSV);
 setDefaultDates();
+
+async function api(path, options={}){ const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers||{})},...options}); const text=await res.text(); let data={}; try{data=JSON.parse(text)}catch{} if(!res.ok) throw new Error(data.error||text||('HTTP '+res.status)); return data; }
+function showMsg(id,msg){const e=$(id);e.textContent=msg;e.classList.remove('hidden');}
+async function boot(){ try{const me=await api('/api/auth/me'); showApp(me); }catch{ $('auth').classList.remove('hidden'); $('app').classList.add('hidden'); }}
+function showApp(me){ $('auth').classList.add('hidden'); $('app').classList.remove('hidden'); $('userInfo').innerHTML='Logged in as <b>'+me.name+'</b> · '+me.email+' · Role: <b>'+me.role+'</b>'; if(me.role==='ADMIN'){ $('adminPanel').classList.remove('hidden'); loadAdmin(); } loadMyStrategies(); }
+async function loadMyStrategies(){try{const rows=await api('/api/user/strategies'); $('myStrategies').innerHTML=rows.length?rows.map(x=>`<div class="trade"><b>${x.name}</b> <span class="badge">${x.type}</span><br>${x.market} · ${x.symbol} · Qty ${x.startingQuantity} · Target ${x.targetPoints} · SL ${x.stopLossPoints} · Recovery ${x.recoveryPoints}<br><button onclick="loadStrategy(${x.id})" style="margin-top:7px">USE THIS STRATEGY</button></div>`).join(''):'No strategy assigned yet. Ask the admin to assign one.';}catch(e){$('myStrategies').textContent=e.message;}}
+async function loadStrategy(id){const rows=await api('/api/user/strategies');const x=rows.find(a=>a.id===id);if(!x)return;$('market').value=x.market;$('symbol').value=x.symbol;$('qty').value=x.startingQuantity;$('target').value=x.targetPoints;$('sl').value=x.stopLossPoints;$('recovery').value=x.recoveryPoints;window.scrollTo({top:document.querySelector('#strategyPanel').getBoundingClientRect().bottom+window.scrollY,behavior:'smooth'});}
+async function loadAdmin(){try{const [ss,us]=await Promise.all([api('/api/admin/strategies'),api('/api/admin/users')]);renderAdminStrategies(ss,us);$('adminUsers').innerHTML=us.map(u=>`<div class="trade"><b>${u.name}</b> · ${u.email} · ${u.role}</div>`).join('');}catch(e){$('adminStrategies').textContent=e.message;}}
+function renderAdminStrategies(ss,us){$('adminStrategies').innerHTML=ss.length?ss.map(x=>`<div class="trade"><b>${x.name}</b> <span class="badge">${x.type}</span><br>${x.market} · ${x.symbol} · Qty ${x.startingQuantity} · T ${x.targetPoints} · SL ${x.stopLossPoints} · R ${x.recoveryPoints}<br><small>Assigned user IDs: ${x.assignedUserIds.join(', ')||'none'}</small><div class="row" style="margin-top:7px">${us.filter(u=>u.role==='USER').map(u=>`<button onclick="assignStrategy(${x.id},${u.id})" class="gray">Assign ${u.name}</button>`).join('')}</div></div>`).join(''):'No strategies created yet.';}
+async function assignStrategy(sid,uid){try{await api(`/api/admin/strategies/${sid}/assign/${uid}`,{method:'POST'});await loadAdmin();await loadMyStrategies();}catch(e){alert(e.message);}}
+$('loginBtn').onclick=async()=>{try{const me=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email:$('loginEmail').value,password:$('loginPassword').value})});showApp(me);}catch(e){showMsg('loginMsg',e.message);}};
+$('registerBtn').onclick=async()=>{try{const r=await api('/api/auth/register',{method:'POST',body:JSON.stringify({name:$('regName').value,email:$('regEmail').value,password:$('regPassword').value})});showMsg('regMsg',r.message);$('loginEmail').value=$('regEmail').value;}catch(e){showMsg('regMsg',e.message);}};
+$('logoutBtn').onclick=async()=>{await api('/api/auth/logout',{method:'POST'});location.reload();};
+$('createStrategy').onclick=async()=>{try{await api('/api/admin/strategies',{method:'POST',body:JSON.stringify({name:$('sName').value,type:$('sType').value,market:$('sMarket').value,symbol:$('sSymbol').value,startingQuantity:Number($('sQty').value),targetPoints:Number($('sTarget').value),stopLossPoints:Number($('sSl').value),recoveryPoints:Number($('sRec').value),enabled:true})});await loadAdmin();alert('Strategy created. Now assign it to a user.');}catch(e){alert(e.message);}};
+boot();
 </script>
 </main>
 </body>
